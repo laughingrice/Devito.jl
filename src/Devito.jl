@@ -102,6 +102,10 @@ function Base.copy!(dst::DevitoMPIArray, src::AbstractArray)
     dst
 end
 
+function Base.copy!(x::Union{Function, TimeFunction, SparseTimeFunction}, val::AbstractArray)
+    py"fill_from_array"(x,val)
+ end
+ 
 function Base.fill!(x::DevitoMPIArray, v)
     MPI.Initialized() || MPI.Init()
     parent(x) .= v
