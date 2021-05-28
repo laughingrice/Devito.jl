@@ -101,10 +101,6 @@ function Base.copy!(dst::DevitoMPIArray, src::AbstractArray)
     MPI.Barrier(MPI.COMM_WORLD)
     dst
 end
-
-function Base.copy!(x::Union{Function, TimeFunction, SparseTimeFunction}, val::AbstractArray)
-    py"fill_from_array"(x,val)
- end
  
 function Base.fill!(x::DevitoMPIArray, v)
     MPI.Initialized() || MPI.Init()
@@ -779,6 +775,10 @@ def indexobj(x,*args):
 function Base.getindex(x::Union{TimeFunction,Function},args...)
    return py"indexobj"(x,reverse(args)...)
 end
+
+function Base.copy!(x::Union{Function, TimeFunction, SparseTimeFunction}, val::AbstractArray)
+    py"fill_from_array"(x,val)
+ end
 
 export DiscreteFunction, Grid, Function, SpaceDimension, SparseTimeFunction, SteppingDimension, TimeDimension, TimeFunction, apply, backward, configuration, configuration!, coordinates, data, data_allocated, data_with_halo, data_with_inhalo, dimensions, dx, dy, dz, extent, forward, grid, inject, interpolate, localindices, localindices_with_halo, localindices_with_inhalo, localsize, size_with_halo, spacing, spacing_map, step
 
