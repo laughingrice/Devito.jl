@@ -1,4 +1,4 @@
-using Devito, Random, PyCall, Strided, Test
+using Revise, Devito, JetPackDevito, Random, PyCall, Strided, Test
 
 configuration!("log-level", "DEBUG")
 configuration!("language", "openmp")
@@ -81,6 +81,52 @@ end
     _stf_coords = coordinates(stf)
     @test _stf_coords ≈ x
 end
+
+@testset "SubDimension" begin
+    grid = Grid(shape = (11,), dtype = Float32)
+    b = Devito.Function(name="b", grid=grid, space_order=2)
+    x = dimensions(b)[1]
+    l = Devito.left("xlft", x, 3)
+    r = Devito.right("xrgt", x, 3)
+
+    data(b) .= 0
+    eqs = [Eq((b.o), 2)]
+    push!(eqs, Eq((b.o).subs(x, l), 1))
+    push!(eqs, Eq((b.o).subs(x, r), 3))
+
+    op = Operator(eqs, name="subdimtest")
+    apply(op)
+
+    expected = Float32[1,1,1,2,2,2,2,2,3,3,3]
+    # @show [data(b) expected]
+
+    @test expected ≈ data(b)
+end
+
+@testset "setupOmegaOverQ 2D" begin
+    nz,nx = 101,101
+    grid = Grid(shape = (nz,nx), dtype = Float32)
+    q = Devito.Function(name="q", grid=grid, space_order=2)
+    x,z = dimensions(q)
+    
+    w = 2.0 * pi * 5.0
+    qmin = 0.001
+    qmax = 150.0
+    npad = 20
+
+    JetPackDevito.setupOmegaOverQ!(q, w, qmin, qmax, npad)
+
+    @show data(q)[div(nz,2),1]
+    @show data(q)[div(nz,2),div(nx,2)]
+
+    close("all")
+    using PyPlot
+    figure(1, figsize=(12,8))
+    imshow(data(q),aspect="auto"); colorbar()
+    tight_layout()
+    display(gcf())
+end
+
 
 using Distributed, MPIClusterManagers
 

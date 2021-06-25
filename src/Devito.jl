@@ -193,7 +193,7 @@ function SpaceDimension end
 """
     SpaceDimension(;kwargs...)
 
-Construct a space dimension that defines the extend of a physical grid.
+Construct a space dimension that defines the extent of a physical grid.
 
 See https://www.devitoproject.org/devito/dimension.html?highlight=spacedimension#devito.types.dimension.SpaceDimension.
 
@@ -632,6 +632,10 @@ Returns a tuple with the dimensions associated with the Devito grid.
 function dimensions(x::Union{Grid{T,N},DiscreteFunction{T,N}}) where {T,N}
     ntuple(i->Dimension(x.o.dimensions[N-i+1]), N)
 end
+
+left(label, dim, thickness) = pycall(devito.SubDimension.left, PyObject, label, dim.o, thickness)
+right(label, dim, thickness) = pycall(devito.SubDimension.right, PyObject, label, dim.o, thickness)
+middle(label, dim, left, right) = pycall(devito.SubDimension.right, PyObject, label, dim.o, left, right)
 
 """
     inject(x::SparseTimeFunction; kwargs...)
