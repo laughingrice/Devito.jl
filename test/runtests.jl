@@ -337,6 +337,8 @@ end
     smap[spacing(t)] = dt
 
     src = SparseTimeFunction(name="src", grid=grid, npoint=1, nt=nt)
+    @test typeof(dimensions(src)[1]) == DimensionDimension
+
     src_coords = coordinates(src)
     src_coords .= [0.5; 0.5]
     src_data = data(src)
@@ -410,7 +412,7 @@ end
 
 @testset "Retrieve time_dim" begin
     g = Grid(shape=(5,5))
-    @test time_dim(g) == g.o.time_dim
+    @test time_dim(g) == Devito.Dimension(g.o.time_dim)
     t = TimeDimension(name="t")
     f = TimeFunction(name="f",time_dim=t,grid=g)
     @test time_dim(f) == t

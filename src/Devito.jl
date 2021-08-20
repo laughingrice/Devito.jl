@@ -192,7 +192,7 @@ end
 #
 # Dimension
 #
-abstract type Dimension end
+abstract type Dimension end # TODO RENAME TYPE ABSTACT DIMENSION
 
 # Python <-> Julia quick-and-dirty type/struct for dimensions 
 for (M,F) in ((:devito,:SpaceDimension), (:devito,:SteppingDimension), (:devito,:TimeDimension), (:devito,:ConditionalDimension))
@@ -206,6 +206,20 @@ for (M,F) in ((:devito,:SpaceDimension), (:devito,:SteppingDimension), (:devito,
         export $F
     end
 end
+
+# Devito sparse functions utilize Dimensions of type Dimension.
+# we are already calling Dimension an abstract type.
+# here is Devito's dimension type hierarchy:
+# https://github.com/devitocodes/devito/blob/02bbefb7e380d299a2508fef2923c1a4fbd5c59d/devito/types/dimension.py
+# in order to gain access to this functionality I am going to call this kind of dimension DimensionDimension for now
+
+struct DimensionDimension <: Dimension
+    o::PyObject
+end
+PyCall.PyObject(x::DimensionDimension) = x.o
+Base.convert(::Type{DimensionDimension}, x::PyObject) = DimensionDimension(x)
+DimensionDimension(args...; kwargs...) = pycall(devito.Dimension, DimensionDimension, args...; kwargs...)
+export DimensionDimension
 
 # Python <-> Julia quick-and-dirty type/struct mappings
 for (M,F) in ((:devito,:Constant), (:devito,:Eq), (:devito,:Injection), (:devito,:Operator))
@@ -234,7 +248,7 @@ x = SpaceDimension(name="x", spacing=Constant(name="h_x", value=5.0))
 ````
 """
 
-Base.:(==)(x::SpaceDimension,y::SpaceDimension) = x.o == y.o
+Base.:(==)(x::Dimension,y::Dimension) = x.o == y.o
 
 function Operator end
 """
@@ -571,7 +585,7 @@ backward(x::TimeFunction) = x.o.backward
 
 Returns the time dimension for the associated object.
 """
-time_dim(x::Union{Grid,TimeFunction}) = x.o.time_dim
+time_dim(x::Union{Grid,TimeFunction}) = Dimension(x.o.time_dim)
 export time_dim
 
 """
@@ -712,13 +726,15 @@ data(x::SparseTimeFunction{T,N,DevitoMPITrue}) where {T,N} = data_with_inhalo(x)
 coordinates(x::SparseTimeFunction{T,N,DevitoMPIFalse}) where {T,N} = DevitoArray{T,N}(x.o.coordinates."_data_allocated")
 coordinates(x::SparseTimeFunction{T,N,DevitoMPITrue}) where {T,N} = DevitoMPIArray{T,N}(x.o.coordinates."_data_allocated", localindices(SubFunction{T,N,DevitoMPITrue}(x.o.coordinates)))
 
-function Dimension(o)
+function Dimension(o::PyObject) # dimension(o::)
     if o.is_Space
         return SpaceDimension(o)
     elseif o.is_Stepping
         return SteppingDimension(o)
     elseif o.is_Time
         return TimeDimension(o)
+    elseif o.is_Dimension # Cludgey way of accessing Devito's Dimension type
+        return DimensionDimension(o)
     else
         error("not implemented")
     end
