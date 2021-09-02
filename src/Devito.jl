@@ -132,7 +132,11 @@ end
 Base.setindex!(x::DevitoMPIArray{T,N}, v, i) where {T,N} = @warn "not implemented"
 Base.IndexStyle(::Type{<:DevitoMPIArray}) = IndexCartesian()
 
+
+
 # TODO -- need to implement broadcasting interface for DevitoMPIArray
+export DevitoMPIArray
+
 
 struct DevitoMPISparseArray{T,N,NM1} <: AbstractArray{T,N}
     o::PyObject

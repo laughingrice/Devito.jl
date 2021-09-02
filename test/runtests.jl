@@ -1,6 +1,6 @@
 using Devito, Random, PyCall, Strided, Test
 
-configuration!("log-level", "DEBUG")
+configuration!("log-level", "CRITICAL")
 configuration!("language", "openmp")
 configuration!("mpi", false)
 
@@ -10,6 +10,7 @@ configuration!("mpi", false)
     configuration!("log-level", "DEBUG")
     c = configuration()
     @test c["log-level"] == "DEBUG"
+    configuration!("log-level", "CRITICAL")
 end
 
 @testset "Grid" begin
