@@ -122,16 +122,175 @@ function Base.fill!(x::DevitoMPIArray, v)
     x
 end
 
-function Base.getindex(x::DevitoMPIArray{T,N}, I::Vararg{Int,N}) where {T,N}
-    if all(ntuple(idim->I[idim] ∈ x.local_indices[idim], N))
-        J = ntuple(idim->I[idim]-x.local_indices[idim]+1, N)
-        v = getindex(x.p, J...)
-    end
-    v
-end
-Base.setindex!(x::DevitoMPIArray{T,N}, v, i) where {T,N} = @warn "not implemented"
-Base.IndexStyle(::Type{<:DevitoMPIArray}) = IndexCartesian()
 
+# define intersections of unit ranges for local coordinate transformations
+
+function intersect(x::UnitRange{Int}, y::UnitRange{Int})::Union{UnitRange{Int},Int}
+    start  = max(x[1],y[1])
+    finish = min(x[end],y[end])
+    if start == finish 
+        return start
+    elseif start > finish
+        return nothing
+    else
+        return start:finish
+    end
+end
+
+intersect(x::Int, y::UnitRange{Int})::Int = (x ∈ y ? x : nothing)
+intersect(y::UnitRange{Int}, x::Int)::Int = intersect(x,y)
+
+intersect(x::Colon, y::Union{UnitRange{Int},Int})::Union{UnitRange{Int},Int} = y
+intersect(y::Union{UnitRange{Int},Int}, x::Colon)::Union{UnitRange{Int},Int} = intersect(x,y)
+
+# and +,- on these unit ranges 
+Base.:-(x::UnitRange{Int}, y::Int)::UnitRange{Int} = x[1]-y:x[end]-y
+Base.:-(y::Int, x::UnitRange{Int})::UnitRange{Int} = x-y
+Base.:+(x::UnitRange{Int}, y::Int)::UnitRange{Int} = x[1]+y:x[end]+y
+Base.:+(y::Int, x::UnitRange{Int})::UnitRange{Int} = x+y
+
+# +,- of unit ranges ends up behaving as a shift for proper indexing,
+# and it DOENT COMMUTE, so it's not really +,- but should work in this context
+Base.:-(x::UnitRange{Int}, y::UnitRange{Int})::UnitRange{Int} = x-y[1]
+Base.:+(x::UnitRange{Int}, y::UnitRange{Int})::UnitRange{Int} = x+y[1]
+
+# Base.:-(x::UnitRange{Int}, y::Colon)::UnitRange{Int} = x-1
+# Base.:-(y::Colon, x::UnitRange{Int})::UnitRange{Int} = x-y
+# Base.:+(x::UnitRange{Int}, y::Colon)::UnitRange{Int} = x-1
+# Base.:+(y::Colon,x::UnitRange{Int})::UnitRange{Int} = x-y
+
+# infinity + 1 = infinity, infinity + infinity = infinity
+Base.:-(x::Union{UnitRange{Int},Int,Colon}, y::Colon)::Colon = y
+Base.:-(y::Colon, x::Union{UnitRange{Int},Int,Colon})::Colon = x-y
+
+Base.:+(x::Union{UnitRange{Int},Int,Colon}, y::Colon)::Colon = y
+Base.:+(y::Colon,x::Union{UnitRange{Int},Int,Colon})::Colon = x+y
+
+padtuple(inp::Tuple, padvalue::Any, N::Int)::Tuple = length(inp) >= N ? inp : ( inp..., ( padvalue for i in 1:(N-length(inp)) )... )
+
+# function Base.getindex(x::DevitoMPIArray{T,N}, I::Vararg{Int,N}) where {T,N}
+#     v = nothing
+#     # fill in missing dims in I with colons
+#     Ii = padtuple( I, Colon(), N)
+#     # get intersection of desired index and local indices (II=Intersect of I)
+#     II = ntuple(idim->intersect(Ii[idim],x.local_indicies[idim]), N)
+#     # make sure the intersection gives us good elements in the array
+#     if all(II .!== nothing)
+#         # convert to local index
+#         LI = ntuple(idim->II[idim]-x.local_indices[idim]+1, N)
+#         # getindex on local array
+#         v = getindex(x.p, LI...)
+#     end
+#     v
+# end
+
+# function Base.convert(::Type{Array}, x::DevitoMPISparseArray{T,N}) where {T,N}
+#     MPI.Initialized() || MPI.Init()
+#     y = zeros(T, size(x))
+#     _x = parent(x)
+#     n = x.o.shape[1]
+#     for j = 1:n
+#         for (i,idx) in enumerate(x.local_indices)
+#             y[idx,j] = _x[i,j]
+#         end
+#     end
+#     MPI.Reduce!(y, +, 0, MPI.COMM_WORLD)
+#     y
+# end
+
+
+# plan:
+# have something that returns zero or index if vararg is just a specific index
+# have something that works on the range indexes and returns getindex over all the indeces in question, then reduces
+function Base.getindex(x::DevitoMPIArray{T,N}, I::Vararg{Int,N}) where {T,N}
+    MPI.Initialized() || MPI.Init()
+    v = zeros(T, MPI.Comm_size(MPI.COMM_WORLD))
+    @show v
+    @show I
+    @show localindices(x)
+    @show MPI.Comm_rank(MPI.COMM_WORLD)
+    if all(ntuple(idim->I[idim] ∈ x.local_indices[idim], N))
+        J = ntuple(idim->I[idim]-x.local_indices[idim][1]+1, N)
+        @show J
+        @show getindex(x.p, J...)
+        v[MPI.Comm_rank(MPI.COMM_WORLD)+1] = getindex(x.p, J...)
+    end
+    MPI.Reduce!(v, +, 0, MPI.COMM_WORLD)
+    sum(v)
+end
+
+Base.setindex!(x::DevitoMPIArray{T,N}, v, i) where {T,N} = error("setindex!(x::DevitoMPIArray) not implemented")
+
+function Base.setindex!(x::DevitoMPIArray{T,N,A}, v::AbstractArray, I::Vararg{Int,N}) where{T,N,A<:AbstractArray}
+    MPI.Initialized() || MPI.Init()
+    @show I
+    # fill in missing dims in I with colons
+    Ii = padtuple( I, Colon(), N)
+    @show Ii
+    @show "I JUST TALKED TO"
+    # get local indices
+    local_inds = localindices(x)
+    # get intersection of desired index and local indices (II=Intersect of I)
+    II = ntuple(idim->intersect(Ii[idim],local_inds[idim]), N)
+    @show II
+    @show "JESUS"
+    if all(II .!== nothing)
+        # convert to local index
+        @show "HE SAID WHAT UP"
+        LI = ntuple(idim->II[idim]-local_inds[idim]+1, N)
+        # and we also need the index on array v that will be written FROM
+        VI = ntuple(idim->II[idim]-Ii[idim]+1, N)
+        @show "YEEEE"
+        @show VI
+        @show LI
+        @show getindex(v,VI...)
+        setindex!(x.p, getindex(v,VI...), LI...)
+        @show "ZUS"
+    end
+    @show "SAID YOU KNOW IM CHILLIN"
+    MPI.Barrier(MPI.COMM_WORLD)
+    @show "TRYIN TO COUNT MY MILLIONS"
+end
+
+function Base.setindex!(x::DevitoMPIArray{T,N,A}, v::Number, I::Vararg{Int,N}) where{T,N,A<:AbstractArray}
+    MPI.Initialized() || MPI.Init()
+    # fill in missing dims in I with colons
+    Ii = padtuple( I, Colon(), N)
+    # get local local_indicies
+    local_inds = localindices(x)
+    @show "I JUST TALKED TO"
+    # get intersection of desired index and local indices (II=Intersect of I)
+    II = ntuple(idim->intersect(Ii[idim],local_inds[idim]), N)
+    @show "JESUS"
+    if all(II .!== nothing)
+        # convert to local index
+        @show "HE SAID WHAT UP"
+        LI = ntuple(idim->II[idim]-local_inds[idim]+1, N)
+        @show "YEEEE"
+        setindex!(x.p, v, LI...)
+        @show "ZUS"
+    end
+    @show "SAID YOU KNOW IM CHILLIN"
+    MPI.Barrier(MPI.COMM_WORLD)
+    @show "TRYIN TO COUNT MY MILLIONS"
+end
+
+# function Base.setindex!(x::DevitoMPIArray{T,N,A}, v, I::Vararg{Int,N}) where{T,N,A<:AbstractArray}
+#     MPI.Initialized() || MPI.Init()
+#     if all(ntuple(idim->I[idim] ∈ x.local_indices[idim], N))
+#         @show "YEEEE"
+#         J = ntuple(idim->I[idim]-x.local_indices[idim]+1, N)
+#         @show J
+#         setindex!(x.p, v, J...)
+#         @show "ZUS"
+#     end
+#     MPI.Barrier(MPI.COMM_WORLD)
+# end
+Base.IndexStyle(::Type{<:DevitoMPIArray}) = IndexCartesian()
+#Base.setindex!(x::DevitoArray{T,N,A}, v, i) where {T,N,A<:Array} = setindex!(parent(x), v, i)
+# Base.setindex!(x::DevitoArray{T,N,A}, v, I::Vararg{Int,N}) where {T,N,A<:StridedView} = setindex!(parent(x), v, I...)
+#Base.getindex(x::DevitoArray{T,N,A}, i) where {T,N,A<:Array} = getindex(parent(x), i)
+#Base.getindex(x::DevitoArray{T,N,A}, I::Vararg{Int,N}) where {T,N,A<:StridedView} = getindex(parent(x), I...)
 # TODO -- need to implement broadcasting interface for DevitoMPIArray
 
 struct DevitoMPISparseArray{T,N,NM1} <: AbstractArray{T,N}
